@@ -1,0 +1,8 @@
+node_modules
+out
+build
+npm-debug.log
+.env
+backend.zip
+frontend.zip
+*.zip

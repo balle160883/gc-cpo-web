@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #f8fafc;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --primary: #2563eb;
+    --primary-foreground: #ffffff;
+    --border: #e2e8f0;
+    --radius: 0.5rem;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900;
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white p-6 rounded-xl border border-slate-200 shadow-sm;
+  }
+  
+  .btn-primary {
+    @apply bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium;
+  }
+}
+
+/* Mapbox Premium Styles */
+.mapboxgl-marker {
+  cursor: pointer;
+  transition: transform 0.2s ease-out;
+}
+
+.mapboxgl-marker:hover {
+  transform: scale(1.15) !important;
+}
+
+.mapboxgl-popup {
+  z-index: 1000;
+}
+
+.mapboxgl-popup-content {
+  @apply rounded-xl border-none shadow-2xl p-0 overflow-hidden !important;
+  background: white !important;
+}
+
+.mapboxgl-popup-close-button {
+  @apply text-slate-400 hover:text-slate-600 p-2 text-xl !important;
+}
