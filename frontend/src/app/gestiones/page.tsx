@@ -76,7 +76,9 @@ export default function GestionesPage() {
     const desc = item.descripcion || "";
     if (desc.startsWith('1-') || desc.startsWith('2-')) return 'Aval';
     if (desc.startsWith('0-')) return 'Socio';
-    return item.sujeto_tipo || 'Socio';
+    const rawSujeto = item.sujeto_tipo || 'Socio';
+    if (rawSujeto.startsWith('Aval')) return 'Aval';
+    return rawSujeto;
   };
 
   // Filtrar interacciones por tipo y sujeto en el frontend

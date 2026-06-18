@@ -197,9 +197,16 @@ export class CrmService {
         }
 
         const sujetoEfectivo = this._getSujetoEfectivo(i);
-        const isAval = sujetoEfectivo === 'Aval';
+        const isAval = sujetoEfectivo.startsWith('Aval');
         const socioName = foundAsig?.NOMBRE || foundSocio?.nombre_completo;
-        const avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
+        let avalName = null;
+        if (sujetoEfectivo === 'Aval 1') {
+          avalName = foundAsig?.['NOMBRE D.A.1'];
+        } else if (sujetoEfectivo === 'Aval 2') {
+          avalName = foundAsig?.['NOMBRE D.A.2'];
+        } else {
+          avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
+        }
 
         return {
           ...i,
@@ -316,9 +323,16 @@ export class CrmService {
         }
 
         const sujetoEfectivo = this._getSujetoEfectivo(i);
-        const isAval = sujetoEfectivo === 'Aval';
+        const isAval = sujetoEfectivo.startsWith('Aval');
         const socioName = foundAsig?.NOMBRE || foundSocio?.nombre_completo;
-        const avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
+        let avalName = null;
+        if (sujetoEfectivo === 'Aval 1') {
+          avalName = foundAsig?.['NOMBRE D.A.1'];
+        } else if (sujetoEfectivo === 'Aval 2') {
+          avalName = foundAsig?.['NOMBRE D.A.2'];
+        } else {
+          avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
+        }
 
         return {
           ...i,
@@ -407,9 +421,16 @@ export class CrmService {
       const foundAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
       const foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === iIdNorm || String(s.friendly_code).trim() === iIdOrig);
       
-      const isAval = sujetoTipo === 'Aval';
+      const isAval = sujetoTipo.startsWith('Aval');
       const socioName = foundAsig?.NOMBRE || foundSocio?.nombre_completo;
-      const avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
+      let avalName = null;
+      if (sujetoTipo === 'Aval 1') {
+        avalName = foundAsig?.['NOMBRE D.A.1'];
+      } else if (sujetoTipo === 'Aval 2') {
+        avalName = foundAsig?.['NOMBRE D.A.2'];
+      } else {
+        avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
+      }
 
       return {
         nombre_visitado: isAval ? (avalName || (socioName ? `Aval de ${socioName}` : null)) : socioName,
