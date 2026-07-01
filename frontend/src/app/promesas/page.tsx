@@ -43,6 +43,12 @@ export default function PromesasPage() {
     loadData();
   }, [selectedGestor, startDate, endDate]);
 
+  const safeFormatDate = (dateStr: any, fallback = 'N/A') => {
+    if (!dateStr) return fallback;
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? fallback : date.toLocaleDateString('es-MX');
+  };
+
   const handleExportExcel = () => {
     const dataToExport = promesas.map(p => ({
       'No. Socio': p.socio_id,
@@ -52,8 +58,8 @@ export default function PromesasPage() {
       'Tipo de Sujeto': p.sujeto_tipo || 'Socio',
       'Origen Promesa': p.is_informal ? 'Bitácora / Gestión' : 'Promesa Formal',
       'Monto': p.is_informal ? 0 : (p.monto || 0),
-      'Fecha Programada': new Date(p.fecha_pago).toLocaleDateString(),
-      'Inicio Gestión': p.fecha_inicio_gestion ? new Date(p.fecha_inicio_gestion).toLocaleDateString('es-MX') : 'N/A',
+      'Fecha Programada': safeFormatDate(p.fecha_pago),
+      'Inicio Gestión': safeFormatDate(p.fecha_inicio_gestion),
       'Gestor': p.gestor_nombre || p.gestor_id,
       'Comentarios/Nota': p.descripcion || 'Sin comentarios registrados',
       'Estado': p.is_informal ? 'Pendiente' : p.estado,

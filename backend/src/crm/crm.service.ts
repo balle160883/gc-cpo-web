@@ -106,12 +106,12 @@ export class CrmService {
       const socioIdStr = String(interaccion.socio_id || '');
       const socioIdNorm = this._normalizeId(socioIdStr);
       
-      const { data: asigData } = await this.supabaseService
-        .getClient()
-        .from('asignacion_gestores')
-        .select('NoCUENTA, "FECHA ASIGNACION"')
-        .or(`NoSOCIO.eq.${socioIdStr},NoSOCIO.eq.${socioIdNorm}`)
-        .limit(1);
+      const client = this.supabaseService.getClient();
+      const promise = interaccion.num_cuenta
+        ? client.from('asignacion_gestores').select('NoCUENTA, "FECHA ASIGNACION"').eq('NoCUENTA', interaccion.num_cuenta)
+        : client.from('asignacion_gestores').select('NoCUENTA, "FECHA ASIGNACION"').or(`NoSOCIO.eq.${socioIdStr},NoSOCIO.eq.${socioIdNorm}`);
+      
+      const { data: asigData } = await promise.limit(1);
 
       if (asigData && asigData.length > 0) {
         // Guardar snapshot de la asignación actual en la interacción
@@ -186,7 +186,10 @@ export class CrmService {
         const iIdNorm = this._normalizeId(i.socio_id);
         const iIdOrig = String(i.socio_id || '').trim();
         
-        let foundAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
+        let foundAsig = avales.find(a => 
+          (this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig) &&
+          (i.num_cuenta ? a.NoCUENTA === i.num_cuenta : true)
+        ) || avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
         let foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === iIdNorm || String(s.friendly_code).trim() === iIdOrig);
         
         // Fallback robusto: si falta la asignación o el número de cuenta
@@ -317,7 +320,10 @@ export class CrmService {
         const iIdNorm = this._normalizeId(i.socio_id);
         const iIdOrig = String(i.socio_id || '').trim();
         
-        let foundAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
+        let foundAsig = avales.find(a => 
+          (this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig) &&
+          (i.num_cuenta ? a.NoCUENTA === i.num_cuenta : true)
+        ) || avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
         let foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === iIdNorm || String(s.friendly_code).trim() === iIdOrig);
         
         // Fallback robusto: si falta la asignación o el número de cuenta
@@ -394,7 +400,7 @@ export class CrmService {
     let interactionQuery = this.supabaseService
       .getClient()
       .from('cobranza_interacciones')
-      .select('id, socio_id, fecha_gestion, descripcion, gestor_id, sujeto_tipo, prestamo_id')
+      .select('id, socio_id, fecha_gestion, descripcion, gestor_id, sujeto_tipo, prestamo_id, num_cuenta, cobranza_promesas(monto_prometido)')
       .eq('resultado', 'promesa_pago')
       .order('fecha_gestion', { ascending: false });
 
@@ -441,11 +447,14 @@ export class CrmService {
     const gestoresMap = new Map((gestoresRes.data || []).map(g => [g.id, g.gestor]));
 
     // Helper to find name and sujeto_tipo
-    const getMetadata = (id: any, sujetoTipo: string = 'Socio') => {
+    const getMetadata = (id: any, sujetoTipo: string = 'Socio', numCuenta?: string) => {
       const iIdNorm = this._normalizeId(id);
       const iIdOrig = String(id || '').trim();
       
-      const foundAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
+      const foundAsig = avales.find(a => 
+        (this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig) &&
+        (numCuenta ? a.NoCUENTA === numCuenta : true)
+      ) || avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
       const foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === iIdNorm || String(s.friendly_code).trim() === iIdOrig);
       
       const isAval = sujetoTipo.startsWith('Aval');
@@ -469,7 +478,7 @@ export class CrmService {
     };
 
     const mappedFormal = formalPromises.map(p => {
-      const metadata = getMetadata(p.prestamos_datos?.socio_id); // Default to Socio for formal if not linked to interaction
+      const metadata = getMetadata(p.prestamos_datos?.socio_id, 'Socio', p.prestamos_datos?.num_cuenta); // Default to Socio for formal if not linked to interaction
       return {
         ...p,
         monto: p.monto_prometido,
@@ -484,12 +493,18 @@ export class CrmService {
 
     const mappedInformal = interactionPromises.map(i => {
       const sujetoEfectivo = this._getSujetoEfectivo(i);
-      const metadata = getMetadata(i.socio_id, sujetoEfectivo);
+      const metadata = getMetadata(i.socio_id, sujetoEfectivo, i.num_cuenta);
+      
+      const promArray = (i as any).cobranza_promesas;
+      const montoPrometido = Array.isArray(promArray) && promArray.length > 0
+        ? Number(promArray[0].monto_prometido || 0)
+        : 0;
+
       return {
         id: i.id,
         is_informal: true,
         num_cuenta: metadata.num_cuenta || 'Bitácora',
-        monto: 0,
+        monto: montoPrometido,
         fecha_pago: i.fecha_gestion,
         estado: 'pendiente',
         descripcion: i.descripcion,

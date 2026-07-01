@@ -299,66 +299,140 @@ export class PortfolioService {
 
     // 1. Obtener gestores de BD para mapeo
     const { data: dbGestoresData } = await this.supabaseService.getClient().from('usuarios_gestor').select('gestor');
-    
+    const dbGestores = dbGestoresData || [];
+
     const clean = (str: string): string => {
       if (!str) return '';
       return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
     };
 
     const cols = Object.keys(data[0]);
-    const gestorCol = cols.find(c => c.toUpperCase().includes('GESTOR') || c.toUpperCase().includes('USUARIO'))!;
-    const cuentaCol = cols.find(c => c.toUpperCase() === "NOCUENTA") || "NoCUENTA";
-    const avalCol = cols.find(c => c.toUpperCase() === "NOMBRE AVAL") || "NOMBRE AVAL";
-    const domicilioCol = cols.find(c => c.toUpperCase() === "DOMICILIO") || "DOMICILIO";
 
-    this.logger.log('Limpiando tabla asignacion_avales para re-importación...');
-    await this.supabaseService.getClient().from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+    // Buscar las columnas clave usando una lógica más flexible
+    const gestorCol = cols.find(c => {
+      const norm = c.toUpperCase().replace(/[\s_.-]/g, '');
+      return norm.includes('GESTOR') || norm.includes('USUARIO');
+    });
+
+    const hasCuentaCol = cols.some(c => {
+      const norm = c.toUpperCase().replace(/[\s_.-]/g, '');
+      return norm === 'NOCUENTA' || norm === 'NUMCUENTA' || norm === 'CUENTA';
+    });
+
+    const hasAvalCol = cols.some(c => {
+      const norm = c.toUpperCase().replace(/[\s_.-]/g, '');
+      return norm === 'NOMBREAVAL' || norm === 'AVAL' || norm.includes('NOMBREAVAL');
+    });
+
+    // Validar columnas requeridas antes de realizar cualquier cambio en la base de datos
+    if (!gestorCol) {
+      return {
+        success: false,
+        message: 'No se encontró la columna del gestor (debe contener "GESTOR" o "USUARIO" en el encabezado)'
+      };
+    }
+    if (!hasCuentaCol) {
+      return {
+        success: false,
+        message: 'No se encontró la columna de la cuenta (debe ser "NoCUENTA", "NumCuenta" o similar)'
+      };
+    }
+    if (!hasAvalCol) {
+      return {
+        success: false,
+        message: 'No se encontró la columna del aval (debe ser "NOMBRE AVAL", "AVAL" o similar)'
+      };
+    }
+
+    // Helper para obtener el valor del renglón de manera insensible a mayúsculas/minúsculas y caracteres especiales
+    const getValueCaseInsensitive = (row: any, ...aliases: string[]): string => {
+      const keys = Object.keys(row);
+      const cleanAliases = aliases.map(a => a.toUpperCase().replace(/[\s_.-]/g, ''));
+      const foundKey = keys.find(k => {
+        const cleanKey = k.toUpperCase().replace(/[\s_.-]/g, '');
+        return cleanAliases.includes(cleanKey);
+      });
+      return foundKey ? String(row[foundKey] || '').trim() : '';
+    };
+
+    const findGestorMatch = (excelName: string): string | null => {
+      const cleanExcel = clean(excelName);
+      if (!cleanExcel) return null;
+
+      // 1. Coincidencia exacta
+      const exactMatch = dbGestores.find(dbg => clean(dbg.gestor) === cleanExcel);
+      if (exactMatch) return exactMatch.gestor;
+
+      // 2. Coincidencia por palabras (descartando preposiciones cortas)
+      const excelWords = cleanExcel.split(/\s+/).filter(w => w.length > 2);
+      if (excelWords.length === 0) return null;
+
+      for (const dbg of dbGestores) {
+        const cleanDb = clean(dbg.gestor);
+        const dbWords = cleanDb.split(/\s+/).filter(w => w.length > 2);
+        if (dbWords.length === 0) continue;
+
+        const allExcelInDb = excelWords.every(w => dbWords.includes(w));
+        const allDbInExcel = dbWords.every(w => excelWords.includes(w));
+        if (allExcelInDb || allDbInExcel) {
+          return dbg.gestor;
+        }
+      }
+
+      return null;
+    };
 
     const assignments: any[] = [];
     const unmatchedGestores = new Set<string>();
 
     for (const row of data) {
       const excelName = String(row[gestorCol] || '').trim();
-      const cleanExcel = clean(excelName);
-      
-      const match = dbGestoresData?.find(dbg => {
-          const cleanDb = clean(dbg.gestor);
-          const excelWords = cleanExcel.split(/\s+/).filter(w => w.length > 2);
-          const dbWords = cleanDb.split(/\s+/).filter(w => w.length > 2);
-          const allExcelInDb = excelWords.every(w => dbWords.includes(w));
-          const allDbInExcel = dbWords.every(w => excelWords.includes(w));
-          return allExcelInDb || allDbInExcel;
-      });
+      if (!excelName) continue; // Si no hay nombre de gestor, ignorar o no asociar
 
-      if (match) {
-          assignments.push({
-              num_cuenta: String(row[cuentaCol] || ''),
-              nombre_aval: String(row[avalCol] || ''),
-              domicilio_aval: String(row[domicilioCol] || ''),
-              colonia_aval: String(row['COLONIA'] || ''),
-              municipio_aval: String(row['MUNICIPIO'] || ''),
-              cp_aval: String(row['CP'] || ''),
-              cruces_aval: String(row['CRUCES'] || ''),
-              estado_aval: String(row['ESTADO'] || 'JALISCO'),
-              gestor_asignado: match.gestor,
-              tipo_aval: 'Aval 1'
-          });
+      const gestorMatch = findGestorMatch(excelName);
+
+      if (gestorMatch) {
+        assignments.push({
+          num_cuenta: getValueCaseInsensitive(row, 'NoCUENTA', 'num_cuenta', 'cuenta', 'numcuenta'),
+          nombre_aval: getValueCaseInsensitive(row, 'NOMBREAVAL', 'nombre_aval', 'aval'),
+          domicilio_aval: getValueCaseInsensitive(row, 'DOMICILIO', 'domicilio_aval', 'domicilio'),
+          colonia_aval: getValueCaseInsensitive(row, 'COLONIA', 'colonia_aval', 'colonia'),
+          municipio_aval: getValueCaseInsensitive(row, 'MUNICIPIO', 'municipio_aval', 'municipio'),
+          cp_aval: getValueCaseInsensitive(row, 'CP', 'cp_aval', 'codigo_postal', 'codigopostal'),
+          cruces_aval: getValueCaseInsensitive(row, 'CRUCES', 'cruces_aval', 'cruce'),
+          estado_aval: getValueCaseInsensitive(row, 'ESTADO', 'estado_aval', 'estado') || 'JALISCO',
+          gestor_asignado: gestorMatch,
+          tipo_aval: 'Aval 1'
+        });
       } else {
-          if (excelName) unmatchedGestores.add(excelName);
+        unmatchedGestores.add(excelName);
       }
     }
+
+    // Si no obtuvimos ningún registro válido que insertar, retornamos con un error y NO borramos los datos actuales
+    if (assignments.length === 0) {
+      return {
+        success: false,
+        message: 'No se encontraron registros válidos o asociables a gestores existentes en el archivo.',
+        gestoresNoEncontrados: Array.from(unmatchedGestores)
+      };
+    }
+
+    this.logger.log(`Limpiando tabla asignacion_avales e importando ${assignments.length} registros...`);
+    // Borrar de forma segura ahora que sabemos que tenemos datos listos para insertar
+    await this.supabaseService.getClient().from('asignacion_avales').delete().neq('id', '00000000-0000-0000-0000-000000000000');
 
     // Insertar en lotes
     const batchSize = 100;
     let insertedCount = 0;
     for (let i = 0; i < assignments.length; i += batchSize) {
-        const batch = assignments.slice(i, i + batchSize);
-        const { error } = await this.supabaseService.getClient().from('asignacion_avales').insert(batch);
-        if (error) {
-            this.logger.error(`Error en lote ${i}: ${error.message}`);
-        } else {
-            insertedCount += batch.length;
-        }
+      const batch = assignments.slice(i, i + batchSize);
+      const { error } = await this.supabaseService.getClient().from('asignacion_avales').insert(batch);
+      if (error) {
+        this.logger.error(`Error en lote ${i}: ${error.message}`);
+      } else {
+        insertedCount += batch.length;
+      }
     }
 
     return {

@@ -125,12 +125,19 @@ export default function GestionesPage() {
     loadData();
   }, [selectedGestor, startDate, endDate]);
 
+  const safeFormatDate = (dateStr: any, isDateTime = false, fallback = 'N/A') => {
+    if (!dateStr) return fallback;
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return fallback;
+    return isDateTime ? date.toLocaleString('es-MX') : date.toLocaleDateString('es-MX');
+  };
+
   const handleExportExcel = () => {
     const dataToExport = filteredInteracciones.map(item => {
       const sujetoExcel = getSujetoEfectivo(item);
       const esAvalExcel = sujetoExcel.startsWith('Aval');
       return {
-        'Fecha': new Date(item.fecha_gestion).toLocaleString('es-MX'),
+        'Fecha': safeFormatDate(item.fecha_gestion, true),
         'Tipo': item.tipo_gestion,
         'NoPrestamo': item.asignacion?.NoCUENTA || item.num_cuenta || 'N/A',
         'Socio ID': item.socio_id,
@@ -139,7 +146,7 @@ export default function GestionesPage() {
         'Nombre Visitado': item.nombre_visitado || item.asignacion?.NOMBRE || '',
         'Gestor': item.usuarios_gestor?.gestor || 'Sistema',
         'Sujeto Visitado': sujetoExcel,
-        'Inicio Gestión': item.fecha_inicio_gestion ? new Date(item.fecha_inicio_gestion).toLocaleDateString('es-MX') : 'N/A',
+        'Inicio Gestión': safeFormatDate(item.fecha_inicio_gestion, false),
         'Comentarios': item.descripcion || '',
         'Resultado': item.resultado || 'Exitoso'
       };
