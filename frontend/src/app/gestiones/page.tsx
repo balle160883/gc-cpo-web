@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MessageSquare, Calendar, Phone, MapPin, CheckCircle2, Loader2, User, FileDown } from "lucide-react";
-import { fetchInteracciones, fetchAllGestores } from "@/lib/api";
+import { MessageSquare, Calendar, Phone, MapPin, CheckCircle2, Loader2, User, FileDown, Plus, X } from "lucide-react";
+import { fetchInteracciones, fetchAllGestores, registrarInteraccion, fetchAsignaciones } from "@/lib/api";
 import * as XLSX from 'xlsx';
 
 type GestionType = 'Todas' | 'Llamada' | 'Visita' | 'Mensaje';
@@ -10,6 +10,7 @@ type GestionType = 'Todas' | 'Llamada' | 'Visita' | 'Mensaje';
 export default function GestionesPage() {
   const [interacciones, setInteracciones] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [gestores, setGestores] = useState<any[]>([]);
   const [selectedGestor, setSelectedGestor] = useState<string>("");
@@ -19,13 +20,89 @@ export default function GestionesPage() {
   const [selectedSujeto, setSelectedSujeto] = useState<'Todos' | 'Socio' | 'Aval'>('Todos');
   const [selectedResultado, setSelectedResultado] = useState<string>("Todos");
 
+  // Estados para Registro de Gestión (Llamada/Mensaje)
+  const [isGestionModalOpen, setIsGestionModalOpen] = useState(false);
+  const [asignacionesList, setAsignacionesList] = useState<any[]>([]);
+  const [loadingAsignaciones, setLoadingAsignaciones] = useState(false);
+  const [searchSocioTerm, setSearchSocioTerm] = useState("");
+  const [selectedSocio, setSelectedSocio] = useState<any>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  const [gestionForm, setGestionForm] = useState({
+    tipo_gestion: 'Llamada',
+    resultado: 'Contacto Exitoso',
+    comentarios: '',
+    fecha_gestion: new Date().toISOString().slice(0, 16)
+  });
+
   useEffect(() => {
     const userInfo = localStorage.getItem('user_info');
     if (userInfo) {
-      const user = JSON.parse(userInfo);
-      setIsAdmin(user.rol === 'admin');
+      const parsedUser = JSON.parse(userInfo);
+      setUser(parsedUser);
+      setIsAdmin(parsedUser.rol === 'admin');
     }
   }, []);
+
+  // Cargar asignaciones para búsqueda de socios al abrir el modal
+  useEffect(() => {
+    if (isGestionModalOpen && user) {
+      setLoadingAsignaciones(true);
+      const effectiveGestor = isAdmin ? "" : user.gestor;
+      fetchAsignaciones(300, effectiveGestor)
+        .then(setAsignacionesList)
+        .catch(console.error)
+        .finally(() => setLoadingAsignaciones(false));
+    }
+  }, [isGestionModalOpen, user, isAdmin]);
+
+  const filteredSocios = asignacionesList.filter(asig => {
+    const term = searchSocioTerm.toLowerCase();
+    const nombre = (asig.NOMBRE || "").toLowerCase();
+    const cuenta = (asig.NoCUENTA || "").toLowerCase();
+    const socioId = (asig.NoSOCIO || "").toLowerCase();
+    return nombre.includes(term) || cuenta.includes(term) || socioId.includes(term);
+  });
+
+  const handleSaveGestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedSocio || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+      await registrarInteraccion({
+        socio_id: selectedSocio['NoSOCIO'],
+        num_cuenta: selectedSocio['NoCUENTA'],
+        tipo_gestion: gestionForm.tipo_gestion,
+        resultado: gestionForm.resultado,
+        descripcion: gestionForm.comentarios,
+        fecha_gestion: gestionForm.fecha_gestion
+      });
+      alert("Gestión guardada con éxito");
+      setIsGestionModalOpen(false);
+      
+      // Limpiar formulario
+      setGestionForm({
+        tipo_gestion: 'Llamada',
+        resultado: 'Contacto Exitoso',
+        comentarios: '',
+        fecha_gestion: new Date().toISOString().slice(0, 16)
+      });
+      setSelectedSocio(null);
+      setSearchSocioTerm("");
+
+      // Refrescar el historial de gestiones
+      setLoading(true);
+      const data = await fetchInteracciones(selectedGestor, startDate, endDate);
+      setInteracciones(data);
+    } catch (error) {
+      console.error(error);
+      alert("Error al guardar la gestión");
+    } finally {
+      setIsSubmitting(false);
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (isAdmin) {
@@ -176,6 +253,14 @@ export default function GestionesPage() {
           </div>
 
           <button 
+            onClick={() => setIsGestionModalOpen(true)}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow-md"
+          >
+            <Plus size={16} />
+            Registrar Gestión
+          </button>
+
+          <button 
             onClick={handleExportExcel}
             className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow-md disabled:opacity-50"
             disabled={filteredInteracciones.length === 0}
@@ -317,6 +402,159 @@ export default function GestionesPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Modal para Registrar Gestión (Llamada/Mensaje) */}
+      {isGestionModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h3 className="font-black text-slate-900 uppercase tracking-tight flex items-center gap-2">
+                <Phone className="text-blue-600" size={20} />
+                Registrar Gestión (Llamada / Mensaje)
+              </h3>
+              <button 
+                onClick={() => {
+                  setIsGestionModalOpen(false);
+                  setSelectedSocio(null);
+                  setSearchSocioTerm("");
+                }} 
+                className="text-slate-400 hover:text-red-500 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleSaveGestion} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+              {/* Buscador de Socio */}
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Buscar Socio / Aval
+                </label>
+                {selectedSocio ? (
+                  <div className="p-3 bg-blue-50 rounded-xl border border-blue-200 flex justify-between items-center">
+                    <div>
+                      <div className="font-extrabold text-blue-900 text-sm">{selectedSocio['NOMBRE']}</div>
+                      <div className="text-[10px] text-blue-500 font-bold uppercase">
+                        Socio: {selectedSocio['NoSOCIO']} • Cuenta: {selectedSocio['NoCUENTA']}
+                      </div>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => setSelectedSocio(null)}
+                      className="text-blue-400 hover:text-red-500 transition-colors font-bold text-xs"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input 
+                      type="text"
+                      placeholder="Escriba nombre, cuenta o ID del socio..."
+                      value={searchSocioTerm}
+                      onChange={(e) => setSearchSocioTerm(e.target.value)}
+                      className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 focus:outline-none"
+                    />
+                    
+                    {/* Lista de sugerencias */}
+                    {searchSocioTerm.trim().length > 0 && (
+                      <div className="border border-slate-100 rounded-xl max-h-48 overflow-y-auto bg-white shadow-inner divide-y divide-slate-50">
+                        {loadingAsignaciones ? (
+                          <div className="p-4 text-center text-xs font-bold text-slate-400">Cargando socios...</div>
+                        ) : filteredSocios.length === 0 ? (
+                          <div className="p-4 text-center text-xs font-bold text-slate-400">No se encontraron coincidencias</div>
+                        ) : (
+                          filteredSocios.slice(0, 10).map((asig) => (
+                            <button
+                              key={asig.NoCUENTA}
+                              type="button"
+                              onClick={() => {
+                                setSelectedSocio(asig);
+                                setSearchSocioTerm("");
+                              }}
+                              className="w-full text-left p-3 hover:bg-slate-50/80 transition-all flex flex-col"
+                            >
+                              <span className="font-bold text-slate-800 text-sm">{asig.NOMBRE}</span>
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">
+                                Socio ID: {asig.NoSOCIO} • Cuenta: {asig.NoCUENTA}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                    Tipo de Gestión
+                  </label>
+                  <select 
+                    value={gestionForm.tipo_gestion}
+                    onChange={(e) => setGestionForm({...gestionForm, tipo_gestion: e.target.value})}
+                    className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="Llamada">Llamada</option>
+                    <option value="Mensaje">Mensaje / WhatsApp</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                    Resultado
+                  </label>
+                  <select 
+                    value={gestionForm.resultado}
+                    onChange={(e) => setGestionForm({...gestionForm, resultado: e.target.value})}
+                    className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="Contacto Exitoso">Contacto Exitoso</option>
+                    <option value="Ilocalizable">Ilocalizable</option>
+                    <option value="Promesa de Pago">Promesa de Pago</option>
+                    <option value="Negativa">Negativa</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                  Comentarios de Gestión
+                </label>
+                <textarea 
+                  required
+                  value={gestionForm.comentarios}
+                  onChange={(e) => setGestionForm({...gestionForm, comentarios: e.target.value})}
+                  className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500/20 min-h-[100px]"
+                  placeholder="Detalle la llamada o mensaje..."
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button"
+                  onClick={() => {
+                    setIsGestionModalOpen(false);
+                    setSelectedSocio(null);
+                    setSearchSocioTerm("");
+                  }}
+                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  disabled={!selectedSocio || isSubmitting}
+                  className="flex-[2] px-4 py-3 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 disabled:opacity-50 transition-all font-mono tracking-tighter"
+                >
+                  {isSubmitting ? "Guardando..." : "Guardar Gestión"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

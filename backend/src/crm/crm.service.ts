@@ -86,6 +86,21 @@ export class CrmService {
   }
 
   async registrarInteraccion(interaccion: any) {
+    // Map tipo_gestion to tipo_contacto for compatibility with the database schema
+    if (interaccion.tipo_gestion) {
+      const tg = String(interaccion.tipo_gestion).toLowerCase();
+      if (tg === 'visita') {
+        interaccion.tipo_contacto = 'visita';
+      } else if (tg === 'llamada') {
+        interaccion.tipo_contacto = 'llamada';
+      } else if (tg === 'mensaje') {
+        interaccion.tipo_contacto = 'whatsapp';
+      } else {
+        interaccion.tipo_contacto = tg;
+      }
+      delete interaccion.tipo_gestion;
+    }
+
     // 1. Capturar contexto de asignación antes de guardar para preservarlo históricamente
     try {
       const socioIdStr = String(interaccion.socio_id || '');
@@ -208,8 +223,14 @@ export class CrmService {
           avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
         }
 
+        const tipoGestion = i.tipo_contacto === 'visita' ? 'Visita' :
+                            i.tipo_contacto === 'llamada' ? 'Llamada' :
+                            (i.tipo_contacto === 'whatsapp' || i.tipo_contacto === 'sms' || i.tipo_contacto === 'mensaje') ? 'Mensaje' :
+                            'Visita';
+
         return {
           ...i,
+          tipo_gestion: tipoGestion,
           nombre_visitado: isAval ? (avalName || (socioName ? `Aval de ${socioName}` : null)) : socioName,
           socios_datos: foundSocio,
           asignacion: foundAsig || (foundSocio ? { NOMBRE: foundSocio.nombre_completo } : null),
@@ -334,8 +355,14 @@ export class CrmService {
           avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
         }
 
+        const tipoGestion = i.tipo_contacto === 'visita' ? 'Visita' :
+                            i.tipo_contacto === 'llamada' ? 'Llamada' :
+                            (i.tipo_contacto === 'whatsapp' || i.tipo_contacto === 'sms' || i.tipo_contacto === 'mensaje') ? 'Mensaje' :
+                            'Visita';
+
         return {
           ...i,
+          tipo_gestion: tipoGestion,
           nombre_visitado: isAval ? (avalName || (socioName ? `Aval de ${socioName}` : null)) : socioName,
           socios_datos: foundSocio,
           asignacion: foundAsig || (foundSocio ? { NOMBRE: foundSocio.nombre_completo } : null),
