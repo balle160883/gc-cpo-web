@@ -58,6 +58,73 @@ export class CrmService {
     return uniqueData;
   }
 
+  private async _mapInteraccionesConAsignacion(uniqueData: any[]): Promise<any[]> {
+    if (!uniqueData || uniqueData.length === 0) return [];
+
+    const socioIds = [...new Set(uniqueData.map(i => i.socio_id))].filter(Boolean);
+    const prestamoIds = [...new Set(uniqueData.map(i => i.prestamo_id))].filter(Boolean);
+
+    // 1. Fetch socios from socios_datos by their internal socio_id
+    const socios = await this._fetchInBatches('socios_datos', 'socio_id', socioIds, 'socio_id, friendly_code, nombre_completo');
+    
+    // 2. Extract friendly codes to query assignments
+    const friendlyCodes = socios.map(s => s.friendly_code).filter(Boolean);
+
+    // 3. Fetch assignments and loans in parallel
+    const [avales, prestamos] = await Promise.all([
+      this._fetchInBatches('asignacion_gestores', 'NoSOCIO', friendlyCodes, 'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"'),
+      prestamoIds.length > 0 ? this._fetchInBatches('prestamos_datos', 'prestamo_id', prestamoIds, 'prestamo_id, num_cuenta, socio_id') : Promise.resolve([])
+    ]);
+
+    return uniqueData.map(i => {
+      const foundSocio = socios.find(s => s.socio_id === i.socio_id);
+      const fCode = foundSocio?.friendly_code;
+
+      let foundAsig = fCode ? (
+        avales.find(a => 
+          a.NoSOCIO === fCode &&
+          (i.num_cuenta ? a.NoCUENTA === i.num_cuenta : true)
+        ) || avales.find(a => a.NoSOCIO === fCode)
+      ) : null;
+
+      // Robust fallback if assignment is missing
+      if (!foundAsig && i.prestamo_id) {
+        const pMatch = prestamos.find((p: any) => p.prestamo_id === i.prestamo_id);
+        if (pMatch) {
+          foundAsig = avales.find(a => a.NoCUENTA === pMatch.num_cuenta);
+        }
+      }
+
+      const sujetoEfectivo = this._getSujetoEfectivo(i);
+      const isAval = sujetoEfectivo.startsWith('Aval');
+      const socioName = foundSocio?.nombre_completo || foundAsig?.NOMBRE;
+      
+      let avalName = null;
+      if (sujetoEfectivo === 'Aval 1') {
+        avalName = foundAsig?.['NOMBRE D.A.1'];
+      } else if (sujetoEfectivo === 'Aval 2') {
+        avalName = foundAsig?.['NOMBRE D.A.2'];
+      } else {
+        avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
+      }
+
+      const tipoGestion = i.tipo_contacto === 'visita' ? 'Visita' :
+                          i.tipo_contacto === 'llamada' ? 'Llamada' :
+                          (i.tipo_contacto === 'whatsapp' || i.tipo_contacto === 'sms' || i.tipo_contacto === 'mensaje') ? 'Mensaje' :
+                          'Visita';
+
+      return {
+        ...i,
+        tipo_gestion: tipoGestion,
+        nombre_visitado: isAval ? (avalName || (socioName ? `Aval de ${socioName}` : null)) : socioName,
+        socios_datos: foundSocio ? { friendly_code: foundSocio.friendly_code, nombre_completo: foundSocio.nombre_completo } : null,
+        asignacion: foundAsig,
+        num_cuenta: i.num_cuenta || foundAsig?.NoCUENTA,
+        fecha_inicio_gestion: i.fecha_inicio_gestion || foundAsig?.['FECHA ASIGNACION']
+      };
+    });
+  }
+
   private async _fetchInBatches(table: string, column: string, ids: any[], selectStr: string = '*'): Promise<any[]> {
     if (!ids || ids.length === 0) return [];
     
@@ -170,83 +237,20 @@ export class CrmService {
     // Deduplicate in memory before doing joins using 120s window
     const uniqueData = this._deduplicateInteracciones(data || []);
 
-    // Manual join with asignacion_gestores and socios_datos
-    if (uniqueData && uniqueData.length > 0) {
-      const socioIds = [...new Set(uniqueData.map(i => i.socio_id))].filter(Boolean);
-      const prestamoIds = [...new Set(uniqueData.map(i => i.prestamo_id))].filter(Boolean);
-      const searchIds = [...new Set([...socioIds, ...socioIds.map(id => this._normalizeId(id))])];
-
-      const [avales, socios, prestamos] = await Promise.all([
-        this._fetchInBatches('asignacion_gestores', 'NoSOCIO', searchIds, 'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"'),
-        this._fetchInBatches('socios_datos', 'friendly_code', searchIds, 'friendly_code, nombre_completo'),
-        prestamoIds.length > 0 ? this._fetchInBatches('prestamos_datos', 'prestamo_id', prestamoIds, 'prestamo_id, num_cuenta, socio_id') : Promise.resolve([])
-      ]);
-
-      return uniqueData.map(i => {
-        const iIdNorm = this._normalizeId(i.socio_id);
-        const iIdOrig = String(i.socio_id || '').trim();
-        
-        let foundAsig = avales.find(a => 
-          (this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig) &&
-          (i.num_cuenta ? a.NoCUENTA === i.num_cuenta : true)
-        ) || avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
-        let foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === iIdNorm || String(s.friendly_code).trim() === iIdOrig);
-        
-        // Fallback robusto: si falta la asignación o el número de cuenta
-        if (!foundAsig || !foundAsig.NoCUENTA) {
-          // 1. Intentar por prestamo_id si existe
-          if (i.prestamo_id) {
-            const pMatch = prestamos.find((p: any) => p.prestamo_id === i.prestamo_id);
-            if (pMatch) {
-              const pIdNorm = this._normalizeId(pMatch.socio_id);
-              if (!foundAsig) foundAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === pIdNorm);
-              if (!foundSocio) foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === pIdNorm);
-              if (!foundAsig && pMatch.num_cuenta) {
-                foundAsig = { NoCUENTA: pMatch.num_cuenta, NoSOCIO: pMatch.socio_id } as any;
-              }
-            }
-          }
-          
-          // 2. Si sigue faltando, buscar cualquier asignación que coincida con el socio_id
-          if (!foundAsig) {
-            const alternativeAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm);
-            if (alternativeAsig) foundAsig = alternativeAsig;
-          }
-        }
-
-        const sujetoEfectivo = this._getSujetoEfectivo(i);
-        const isAval = sujetoEfectivo.startsWith('Aval');
-        const socioName = foundAsig?.NOMBRE || foundSocio?.nombre_completo;
-        let avalName = null;
-        if (sujetoEfectivo === 'Aval 1') {
-          avalName = foundAsig?.['NOMBRE D.A.1'];
-        } else if (sujetoEfectivo === 'Aval 2') {
-          avalName = foundAsig?.['NOMBRE D.A.2'];
-        } else {
-          avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
-        }
-
-        const tipoGestion = i.tipo_contacto === 'visita' ? 'Visita' :
-                            i.tipo_contacto === 'llamada' ? 'Llamada' :
-                            (i.tipo_contacto === 'whatsapp' || i.tipo_contacto === 'sms' || i.tipo_contacto === 'mensaje') ? 'Mensaje' :
-                            'Visita';
-
-        return {
-          ...i,
-          tipo_gestion: tipoGestion,
-          nombre_visitado: isAval ? (avalName || (socioName ? `Aval de ${socioName}` : null)) : socioName,
-          socios_datos: foundSocio,
-          asignacion: foundAsig || (foundSocio ? { NOMBRE: foundSocio.nombre_completo } : null),
-          num_cuenta: i.num_cuenta || foundAsig?.NoCUENTA,
-          fecha_inicio_gestion: i.fecha_inicio_gestion || foundAsig?.['FECHA ASIGNACION']
-        };
-      });
-    }
-
-    return uniqueData;
+    return this._mapInteraccionesConAsignacion(uniqueData);
   }
 
   async getInteracciones(gestorId?: string, startDate?: string, endDate?: string) {
+    let resolvedGestorId = gestorId;
+    if (gestorId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(gestorId)) {
+      const { data: gData } = await this.supabaseService.getClient()
+        .from('usuarios_gestor')
+        .select('id')
+        .ilike('gestor', `%${gestorId.trim()}%`)
+        .limit(1);
+      resolvedGestorId = gData && gData.length > 0 ? gData[0].id : '00000000-0000-0000-0000-000000000000';
+    }
+
     // Lógica de Paginación Automática para superar el límite de 1,000 de Postgrest/Supabase
     let allData: any[] = [];
     let from = 0;
@@ -262,7 +266,7 @@ export class CrmService {
         .order('fecha_gestion', { ascending: false })
         .range(from, to);
 
-      if (gestorId) paginatedQuery = paginatedQuery.eq('gestor_id', gestorId);
+      if (resolvedGestorId) paginatedQuery = paginatedQuery.eq('gestor_id', resolvedGestorId);
       if (startDate) paginatedQuery = paginatedQuery.gte('fecha_gestion', startDate);
       if (endDate) {
         const end = new Date(endDate);
@@ -305,89 +309,74 @@ export class CrmService {
     }
 
     // Manual join with asignacion_gestores and socios_datos
-    if (uniqueData && uniqueData.length > 0) {
-      const socioIds = [...new Set(uniqueData.map(i => i.socio_id))].filter(Boolean);
-      const prestamoIds = [...new Set(uniqueData.map(i => i.prestamo_id))].filter(Boolean);
-      const searchIds = [...new Set([...socioIds, ...socioIds.map(id => this._normalizeId(id))])];
-
-      const [avales, socios, prestamos] = await Promise.all([
-        this._fetchInBatches('asignacion_gestores', 'NoSOCIO', searchIds, 'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"'),
-        this._fetchInBatches('socios_datos', 'friendly_code', searchIds, 'friendly_code, nombre_completo'),
-        prestamoIds.length > 0 ? this._fetchInBatches('prestamos_datos', 'prestamo_id', prestamoIds, 'prestamo_id, num_cuenta, socio_id') : Promise.resolve([])
-      ]);
-
-      return uniqueData.map(i => {
-        const iIdNorm = this._normalizeId(i.socio_id);
-        const iIdOrig = String(i.socio_id || '').trim();
-        
-        let foundAsig = avales.find(a => 
-          (this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig) &&
-          (i.num_cuenta ? a.NoCUENTA === i.num_cuenta : true)
-        ) || avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm || String(a.NoSOCIO).trim() === iIdOrig);
-        let foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === iIdNorm || String(s.friendly_code).trim() === iIdOrig);
-        
-        // Fallback robusto: si falta la asignación o el número de cuenta
-        if (!foundAsig || !foundAsig.NoCUENTA) {
-          // 1. Intentar por prestamo_id si existe
-          if (i.prestamo_id) {
-            const pMatch = prestamos.find((p: any) => p.prestamo_id === i.prestamo_id);
-            if (pMatch) {
-              const pIdNorm = this._normalizeId(pMatch.socio_id);
-              if (!foundAsig) foundAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === pIdNorm);
-              if (!foundSocio) foundSocio = socios.find(s => this._normalizeId(s.friendly_code) === pIdNorm);
-              
-              if (!foundAsig && pMatch.num_cuenta) {
-                foundAsig = { NoCUENTA: pMatch.num_cuenta, NoSOCIO: pMatch.socio_id } as any;
-              }
-            }
-          }
-
-          // 2. Si sigue faltando, buscar cualquier asignación que coincida con el socio_id
-          if (!foundAsig) {
-            const alternativeAsig = avales.find(a => this._normalizeId(a.NoSOCIO) === iIdNorm);
-            if (alternativeAsig) foundAsig = alternativeAsig;
-          }
-        }
-
-        const sujetoEfectivo = this._getSujetoEfectivo(i);
-        const isAval = sujetoEfectivo.startsWith('Aval');
-        const socioName = foundAsig?.NOMBRE || foundSocio?.nombre_completo;
-        let avalName = null;
-        if (sujetoEfectivo === 'Aval 1') {
-          avalName = foundAsig?.['NOMBRE D.A.1'];
-        } else if (sujetoEfectivo === 'Aval 2') {
-          avalName = foundAsig?.['NOMBRE D.A.2'];
-        } else {
-          avalName = foundAsig?.['NOMBRE D.A.1'] || foundAsig?.['NOMBRE D.A.2'];
-        }
-
-        const tipoGestion = i.tipo_contacto === 'visita' ? 'Visita' :
-                            i.tipo_contacto === 'llamada' ? 'Llamada' :
-                            (i.tipo_contacto === 'whatsapp' || i.tipo_contacto === 'sms' || i.tipo_contacto === 'mensaje') ? 'Mensaje' :
-                            'Visita';
-
-        return {
-          ...i,
-          tipo_gestion: tipoGestion,
-          nombre_visitado: isAval ? (avalName || (socioName ? `Aval de ${socioName}` : null)) : socioName,
-          socios_datos: foundSocio,
-          asignacion: foundAsig || (foundSocio ? { NOMBRE: foundSocio.nombre_completo } : null),
-          num_cuenta: i.num_cuenta || foundAsig?.NoCUENTA,
-          fecha_inicio_gestion: i.fecha_inicio_gestion || foundAsig?.['FECHA ASIGNACION']
-        };
-      });
-    }
-
-    return uniqueData;
+    return this._mapInteraccionesConAsignacion(uniqueData);
   }
 
   async getPromesasPendientes(gestorId?: string, startDate?: string, endDate?: string) {
+    let resolvedGestorId = gestorId;
+    let gestorName = gestorId;
+    if (gestorId) {
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(gestorId)) {
+        // Resolve UUID to name
+        const { data: gData } = await this.supabaseService.getClient()
+          .from('usuarios_gestor')
+          .select('id, gestor')
+          .eq('id', gestorId)
+          .limit(1);
+        if (gData && gData.length > 0) {
+          gestorName = gData[0].gestor;
+          resolvedGestorId = gData[0].id;
+        } else {
+          resolvedGestorId = '00000000-0000-0000-0000-000000000000';
+          gestorName = '';
+        }
+      } else {
+        // Resolve name to UUID
+        const { data: gData } = await this.supabaseService.getClient()
+          .from('usuarios_gestor')
+          .select('id, gestor')
+          .ilike('gestor', `%${gestorId.trim()}%`)
+          .limit(1);
+        if (gData && gData.length > 0) {
+          resolvedGestorId = gData[0].id;
+          gestorName = gData[0].gestor;
+        } else {
+          resolvedGestorId = '00000000-0000-0000-0000-000000000000';
+          gestorName = '';
+        }
+      }
+    }
+
     // 1. Query structured promises from cobranza_promesas
     let promiseQuery = this.supabaseService
       .getClient()
       .from('cobranza_promesas')
       .select('*, prestamos_datos(num_cuenta, socio_id, socios_datos(friendly_code, nombre_completo))')
       .eq('estado', 'pendiente');
+
+    if (gestorName) {
+      const { data: asignaciones } = await this.supabaseService.getClient()
+        .from('asignacion_gestores')
+        .select('NoCUENTA')
+        .eq('GESTOR ASIGNADO', gestorName);
+      
+      const cuentas = asignaciones?.map(a => a.NoCUENTA) || [];
+      if (cuentas.length > 0) {
+        const { data: pData } = await this.supabaseService.getClient()
+          .from('prestamos_datos')
+          .select('prestamo_id')
+          .in('num_cuenta', cuentas);
+        
+        const pIds = pData?.map(p => p.prestamo_id) || [];
+        if (pIds.length > 0) {
+          promiseQuery = promiseQuery.in('prestamo_id', pIds);
+        } else {
+          promiseQuery = promiseQuery.in('prestamo_id', [-1]);
+        }
+      } else {
+        promiseQuery = promiseQuery.in('prestamo_id', [-1]);
+      }
+    }
 
     if (startDate) promiseQuery = promiseQuery.gte('fecha_promesa', startDate);
     if (endDate) {
@@ -404,8 +393,8 @@ export class CrmService {
       .eq('resultado', 'promesa_pago')
       .order('fecha_gestion', { ascending: false });
 
-    if (gestorId) {
-      interactionQuery = interactionQuery.eq('gestor_id', gestorId);
+    if (resolvedGestorId) {
+      interactionQuery = interactionQuery.eq('gestor_id', resolvedGestorId);
     }
     
     if (startDate) interactionQuery = interactionQuery.gte('fecha_gestion', startDate);
