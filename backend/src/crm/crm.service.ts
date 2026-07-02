@@ -64,11 +64,39 @@ export class CrmService {
     const socioIds = [...new Set(uniqueData.map(i => i.socio_id))].filter(Boolean);
     const prestamoIds = [...new Set(uniqueData.map(i => i.prestamo_id))].filter(Boolean);
 
-    // 1. Fetch socios from socios_datos by their internal socio_id
-    const socios = await this._fetchInBatches('socios_datos', 'socio_id', socioIds, 'socio_id, friendly_code, nombre_completo');
+    const numericSocioIds = socioIds.filter(id => !isNaN(Number(id))).map(id => Number(id));
+    
+    const stringSocioIds: string[] = [];
+    socioIds.forEach(id => {
+      if (isNaN(Number(id))) {
+        const rawStr = String(id).trim();
+        stringSocioIds.push(rawStr);
+        const digits = rawStr.replace(/\D/g, '');
+        if (digits.length > 0) {
+          stringSocioIds.push(digits.padStart(8, '0'));
+        }
+      }
+    });
+
+    const uniqueStringSocioIds = [...new Set(stringSocioIds)];
+
+    // 1. Fetch socios from socios_datos by their internal socio_id and friendly_code formats in parallel
+    const [sociosByNum, sociosByStr] = await Promise.all([
+      numericSocioIds.length > 0
+        ? this._fetchInBatches('socios_datos', 'socio_id', numericSocioIds, 'socio_id, friendly_code, nombre_completo')
+        : Promise.resolve([]),
+      uniqueStringSocioIds.length > 0
+        ? this._fetchInBatches('socios_datos', 'friendly_code', uniqueStringSocioIds, 'socio_id, friendly_code, nombre_completo')
+        : Promise.resolve([])
+    ]);
+
+    const socios = [...sociosByNum, ...sociosByStr];
     
     // 2. Extract friendly codes to query assignments
-    const friendlyCodes = socios.map(s => s.friendly_code).filter(Boolean);
+    const friendlyCodes = [...new Set([
+      ...socios.map(s => s.friendly_code),
+      ...uniqueStringSocioIds
+    ])].filter(Boolean);
 
     // 3. Fetch assignments and loans in parallel
     const [avales, prestamos] = await Promise.all([
@@ -77,8 +105,16 @@ export class CrmService {
     ]);
 
     return uniqueData.map(i => {
-      const foundSocio = socios.find(s => s.socio_id === i.socio_id);
-      const fCode = foundSocio?.friendly_code;
+      const isNum = !isNaN(Number(i.socio_id));
+      const iStr = String(i.socio_id).trim();
+      const iDigits = iStr.replace(/\D/g, '');
+      const iPadded = iDigits.padStart(8, '0');
+
+      const foundSocio = socios.find(s => {
+        if (isNum) return s.socio_id === Number(i.socio_id);
+        return s.friendly_code === iStr || s.friendly_code === iPadded;
+      });
+      const fCode = foundSocio?.friendly_code || (isNum ? null : iStr);
 
       let foundAsig = fCode ? (
         avales.find(a => 
@@ -87,11 +123,23 @@ export class CrmService {
         ) || avales.find(a => a.NoSOCIO === fCode)
       ) : null;
 
+      // Fallback 1: compare base digits (ignoring sucursal prefix and leading zeroes)
+      if (!foundAsig && fCode) {
+        const cleanFCode = fCode.replace(/\D/g, '').replace(/^0+/, '');
+        foundAsig = avales.find(a => {
+          const cleanNoSocio = a.NoSOCIO.trim().replace(/\D/g, '').replace(/^0+/, '');
+          return cleanNoSocio.length > 0 && cleanNoSocio === cleanFCode && (i.num_cuenta ? a.NoCUENTA === i.num_cuenta : true);
+        }) || avales.find(a => {
+          const cleanNoSocio = a.NoSOCIO.trim().replace(/\D/g, '').replace(/^0+/, '');
+          return cleanNoSocio.length > 0 && cleanNoSocio === cleanFCode;
+        }) || null;
+      }
+
       // Robust fallback if assignment is missing
       if (!foundAsig && i.prestamo_id) {
         const pMatch = prestamos.find((p: any) => p.prestamo_id === i.prestamo_id);
         if (pMatch) {
-          foundAsig = avales.find(a => a.NoCUENTA === pMatch.num_cuenta);
+          foundAsig = avales.find(a => a.NoCUENTA === pMatch.num_cuenta) || null;
         }
       }
 
