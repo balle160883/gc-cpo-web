@@ -63,27 +63,31 @@ export class CrmService {
 
     const socioIds = [...new Set(uniqueData.map(i => i.socio_id))].filter(Boolean);
     const prestamoIds = [...new Set(uniqueData.map(i => i.prestamo_id))].filter(Boolean);
+    const numCuentas = [...new Set(uniqueData.map(i => i.num_cuenta))].filter(Boolean);
 
-    const numericSocioIds = socioIds.filter(id => !isNaN(Number(id))).map(id => Number(id));
-    
+    const numericSocioIds: number[] = [];
     const stringSocioIds: string[] = [];
+
     socioIds.forEach(id => {
-      if (isNaN(Number(id))) {
-        const rawStr = String(id).trim();
-        stringSocioIds.push(rawStr);
-        const digits = rawStr.replace(/\D/g, '');
-        if (digits.length > 0) {
-          stringSocioIds.push(digits.padStart(8, '0'));
-        }
+      const num = Number(id);
+      if (!isNaN(num)) {
+        numericSocioIds.push(num);
+      }
+      const rawStr = String(id).trim();
+      stringSocioIds.push(rawStr);
+      const digits = rawStr.replace(/\D/g, '');
+      if (digits.length > 0) {
+        stringSocioIds.push(digits.padStart(8, '0'));
       }
     });
 
+    const uniqueNumericSocioIds = [...new Set(numericSocioIds)];
     const uniqueStringSocioIds = [...new Set(stringSocioIds)];
 
     // 1. Fetch socios from socios_datos by their internal socio_id and friendly_code formats in parallel
     const [sociosByNum, sociosByStr] = await Promise.all([
-      numericSocioIds.length > 0
-        ? this._fetchInBatches('socios_datos', 'socio_id', numericSocioIds, 'socio_id, friendly_code, nombre_completo')
+      uniqueNumericSocioIds.length > 0
+        ? this._fetchInBatches('socios_datos', 'socio_id', uniqueNumericSocioIds, 'socio_id, friendly_code, nombre_completo')
         : Promise.resolve([]),
       uniqueStringSocioIds.length > 0
         ? this._fetchInBatches('socios_datos', 'friendly_code', uniqueStringSocioIds, 'socio_id, friendly_code, nombre_completo')
@@ -98,11 +102,16 @@ export class CrmService {
       ...uniqueStringSocioIds
     ])].filter(Boolean);
 
-    // 3. Fetch assignments and loans in parallel
-    const [avales, prestamos] = await Promise.all([
+    // 3. Fetch assignments (by Socio and by Account) and loans in parallel
+    const [avalesBySocio, avalesByCuenta, prestamos] = await Promise.all([
       this._fetchInBatches('asignacion_gestores', 'NoSOCIO', friendlyCodes, 'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"'),
+      numCuentas.length > 0
+        ? this._fetchInBatches('asignacion_gestores', 'NoCUENTA', numCuentas, 'NoSOCIO, NoCUENTA, NOMBRE, "NOMBRE D.A.1", "NOMBRE D.A.2", "FECHA ASIGNACION"')
+        : Promise.resolve([]),
       prestamoIds.length > 0 ? this._fetchInBatches('prestamos_datos', 'prestamo_id', prestamoIds, 'prestamo_id, num_cuenta, socio_id') : Promise.resolve([])
     ]);
+
+    const avales = [...avalesBySocio, ...avalesByCuenta];
 
     return uniqueData.map(i => {
       const isNum = !isNaN(Number(i.socio_id));
@@ -111,7 +120,7 @@ export class CrmService {
       const iPadded = iDigits.padStart(8, '0');
 
       const foundSocio = socios.find(s => {
-        if (isNum) return s.socio_id === Number(i.socio_id);
+        if (s.socio_id === Number(i.socio_id)) return true;
         return s.friendly_code === iStr || s.friendly_code === iPadded;
       });
       const fCode = foundSocio?.friendly_code || (isNum ? null : iStr);
@@ -135,6 +144,11 @@ export class CrmService {
         }) || null;
       }
 
+      // Fallback 2: if still not found, search by account number (NoCUENTA)
+      if (!foundAsig && i.num_cuenta) {
+        foundAsig = avales.find(a => a.NoCUENTA === i.num_cuenta) || null;
+      }
+
       // Robust fallback if assignment is missing
       if (!foundAsig && i.prestamo_id) {
         const pMatch = prestamos.find((p: any) => p.prestamo_id === i.prestamo_id);
@@ -145,7 +159,7 @@ export class CrmService {
 
       const sujetoEfectivo = this._getSujetoEfectivo(i);
       const isAval = sujetoEfectivo.startsWith('Aval');
-      const socioName = foundSocio?.nombre_completo || foundAsig?.NOMBRE;
+      const socioName = foundSocio?.nombre_completo || foundAsig?.NOMBRE || '';
       
       let avalName = null;
       if (sujetoEfectivo === 'Aval 1') {
