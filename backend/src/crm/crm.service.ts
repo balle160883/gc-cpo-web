@@ -409,12 +409,13 @@ export class CrmService {
       }
     }
 
-    // 1. Query structured promises from cobranza_promesas
+    // 1. Query structured promises from cobranza_promesas that are NOT linked to any interaction
     let promiseQuery = this.supabaseService
       .getClient()
       .from('cobranza_promesas')
       .select('*, prestamos_datos(num_cuenta, socio_id, socios_datos(friendly_code, nombre_completo))')
-      .eq('estado', 'pendiente');
+      .eq('estado', 'pendiente')
+      .is('interaccion_id', null);
 
     if (gestorName) {
       const { data: asignaciones } = await this.supabaseService.getClient()
@@ -447,11 +448,11 @@ export class CrmService {
        promiseQuery = promiseQuery.lte('fecha_promesa', end.toISOString());
     }
 
-    // 2. Query informal promises from cobranza_interacciones
+    // 2. Query informal and formal promises originating from cobranza_interacciones
     let interactionQuery = this.supabaseService
       .getClient()
       .from('cobranza_interacciones')
-      .select('id, socio_id, fecha_gestion, descripcion, gestor_id, sujeto_tipo, prestamo_id, num_cuenta, cobranza_promesas(monto_prometido)')
+      .select('id, socio_id, fecha_gestion, descripcion, gestor_id, sujeto_tipo, prestamo_id, num_cuenta, cobranza_promesas(*)')
       .eq('resultado', 'promesa_pago')
       .order('fecha_gestion', { ascending: false });
 
@@ -547,17 +548,20 @@ export class CrmService {
       const metadata = getMetadata(i.socio_id, sujetoEfectivo, i.num_cuenta);
       
       const promArray = (i as any).cobranza_promesas;
-      const montoPrometido = Array.isArray(promArray) && promArray.length > 0
-        ? Number(promArray[0].monto_prometido || 0)
-        : 0;
+      const hasFormal = Array.isArray(promArray) && promArray.length > 0;
+      const formalPromise = hasFormal ? promArray[0] : null;
+
+      const monto = formalPromise ? Number(formalPromise.monto_prometido || 0) : 0;
+      const fechaPago = formalPromise ? formalPromise.fecha_promesa : i.fecha_gestion;
+      const estado = formalPromise ? formalPromise.estado : 'pendiente';
 
       return {
         id: i.id,
-        is_informal: true,
-        num_cuenta: metadata.num_cuenta || 'Bitácora',
-        monto: montoPrometido,
-        fecha_pago: i.fecha_gestion,
-        estado: 'pendiente',
+        is_informal: !hasFormal,
+        num_cuenta: metadata.num_cuenta || i.num_cuenta || 'Bitácora',
+        monto: monto,
+        fecha_pago: fechaPago,
+        estado: estado,
         descripcion: i.descripcion,
         gestor_id: i.gestor_id,
         gestor_nombre: gestoresMap.get(i.gestor_id),

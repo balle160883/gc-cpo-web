@@ -209,7 +209,7 @@ export default function PromesasPage() {
                   </div>
                   <div className="text-right flex items-center gap-8">
                     <div className="max-w-[200px]">
-                      {p.is_informal && (
+                      {p.descripcion && (
                         <div className="text-xs text-slate-600 font-medium italic mb-1 line-clamp-1">
                           "{p.descripcion}"
                         </div>
