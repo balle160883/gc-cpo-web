@@ -76,7 +76,10 @@ export async function fetchPromesasPendientes(gestorId?: string, startDate?: str
   if (startDate) params.append('startDate', startDate);
   if (endDate) params.append('endDate', endDate);
   
-  const res = await fetch(url + params.toString(), { headers });
+  const res = await fetch(url + params.toString(), { 
+    headers,
+    cache: 'no-store'
+  });
   if (!res.ok) throw new Error('Failed to fetch pending promises');
   return res.json();
 }
