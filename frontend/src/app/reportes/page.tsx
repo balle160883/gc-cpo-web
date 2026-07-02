@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { BarChart3, Download, TrendingUp, PieChart, FileText, Loader2 } from "lucide-react";
 import { fetchGestoresLocations, fetchAsignaciones, fetchRecuperacion, fetchInteracciones, fetchAllGestores } from "@/lib/api";
+import * as XLSX from 'xlsx';
 
 export default function ReportesPage() {
   const [isAdmin, setIsAdmin] = useState(false);
@@ -62,6 +63,50 @@ export default function ReportesPage() {
     }
     loadBI();
   }, [isMounted, user, selectedGestor, isAdmin]);
+
+  const safeFormatDate = (dateStr: any, isDateTime = false, fallback = 'N/A') => {
+    if (!dateStr) return fallback;
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return fallback;
+    return isDateTime ? date.toLocaleString('es-MX') : date.toLocaleDateString('es-MX');
+  };
+
+  const getSujetoEfectivo = (item: any) => {
+    const desc = item.descripcion || "";
+    if (desc.startsWith('1-') || desc.startsWith('2-')) return 'Aval';
+    if (desc.startsWith('0-')) return 'Socio';
+    const rawSujeto = item.sujeto_tipo || 'Socio';
+    if (rawSujeto.startsWith('Aval')) return 'Aval';
+    return rawSujeto;
+  };
+
+  const handleExportExcel = () => {
+    if (!interacciones || interacciones.length === 0) return;
+    const dataToExport = interacciones.map(item => {
+      const sujetoExcel = getSujetoEfectivo(item);
+      const esAvalExcel = sujetoExcel.startsWith('Aval');
+      return {
+        'Fecha': safeFormatDate(item.fecha_gestion, true),
+        'Tipo': item.tipo_gestion,
+        'NoPrestamo': item.asignacion?.NoCUENTA || item.num_cuenta || 'N/A',
+        'Socio ID': item.socio_id,
+        'Nombre Socio': item.asignacion?.NOMBRE || '',
+        'Nombre Aval': esAvalExcel ? (item.nombre_visitado || '') : '',
+        'Nombre Visitado': item.nombre_visitado || item.asignacion?.NOMBRE || '',
+        'Gestor': item.usuarios_gestor?.gestor || 'Sistema',
+        'Sujeto Visitado': sujetoExcel,
+        'Inicio Gestión': safeFormatDate(item.fecha_inicio_gestion, false),
+        'Comentarios': item.descripcion || '',
+        'Resultado': item.resultado || 'Exitoso'
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Gestiones");
+    const fileName = `Reporte_Gestiones_${selectedGestor || 'Todos'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
 
   // 2. Retornos condicionales
   if (!isMounted) return null;
@@ -124,7 +169,11 @@ export default function ReportesPage() {
                 </select>
               </div>
             )}
-            <button className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-semibold border border-slate-200 hover:bg-slate-200 transition-colors">
+            <button 
+              onClick={handleExportExcel}
+              disabled={loading || interacciones.length === 0}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-semibold border border-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <Download size={18} />
               Exportar Datos
             </button>
