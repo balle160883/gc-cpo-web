@@ -35,6 +35,7 @@ async function run() {
 
   const assignments: any[] = [];
   const unmatched = new Set<string>();
+  const cuentaCount = new Map<string, number>();
 
   for (const row of data) {
     const excelName = String(row[gestorCol] || '').trim();
@@ -48,8 +49,13 @@ async function run() {
     });
 
     if (match) {
+        const numCuenta = String(row[cuentaCol] || '');
+        const count = cuentaCount.get(numCuenta) || 0;
+        cuentaCount.set(numCuenta, count + 1);
+        const tipoAval = count === 0 ? 'Aval 1' : 'Aval 2';
+
         assignments.push({
-            num_cuenta: String(row[cuentaCol] || ''),
+            num_cuenta: numCuenta,
             nombre_aval: String(row[avalCol] || ''),
             domicilio_aval: String(row[domicilioCol] || ''),
             colonia_aval: String(row['COLONIA'] || ''),
@@ -58,7 +64,7 @@ async function run() {
             cruces_aval: String(row['CRUCES'] || ''),
             estado_aval: String(row['ESTADO'] || 'JALISCO'),
             gestor_asignado: match.gestor,
-            tipo_aval: 'Aval 1'
+            tipo_aval: tipoAval
         });
     } else {
         if (excelName) unmatched.add(excelName);

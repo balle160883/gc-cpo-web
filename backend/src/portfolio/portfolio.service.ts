@@ -384,6 +384,7 @@ export class PortfolioService {
 
     const assignments: any[] = [];
     const unmatchedGestores = new Set<string>();
+    const cuentaCount = new Map<string, number>();
 
     for (const row of data) {
       const excelName = String(row[gestorCol] || '').trim();
@@ -392,8 +393,13 @@ export class PortfolioService {
       const gestorMatch = findGestorMatch(excelName);
 
       if (gestorMatch) {
+        const numCuenta = getValueCaseInsensitive(row, 'NoCUENTA', 'num_cuenta', 'cuenta', 'numcuenta');
+        const count = cuentaCount.get(numCuenta) || 0;
+        cuentaCount.set(numCuenta, count + 1);
+        const tipoAval = count === 0 ? 'Aval 1' : 'Aval 2';
+
         assignments.push({
-          num_cuenta: getValueCaseInsensitive(row, 'NoCUENTA', 'num_cuenta', 'cuenta', 'numcuenta'),
+          num_cuenta: numCuenta,
           nombre_aval: getValueCaseInsensitive(row, 'NOMBREAVAL', 'nombre_aval', 'aval'),
           domicilio_aval: getValueCaseInsensitive(row, 'DOMICILIO', 'domicilio_aval', 'domicilio'),
           colonia_aval: getValueCaseInsensitive(row, 'COLONIA', 'colonia_aval', 'colonia'),
@@ -402,7 +408,7 @@ export class PortfolioService {
           cruces_aval: getValueCaseInsensitive(row, 'CRUCES', 'cruces_aval', 'cruce'),
           estado_aval: getValueCaseInsensitive(row, 'ESTADO', 'estado_aval', 'estado') || 'JALISCO',
           gestor_asignado: gestorMatch,
-          tipo_aval: 'Aval 1'
+          tipo_aval: tipoAval
         });
       } else {
         unmatchedGestores.add(excelName);
