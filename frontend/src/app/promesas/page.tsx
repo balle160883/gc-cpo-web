@@ -57,7 +57,7 @@ export default function PromesasPage() {
       'Sujeto Visitado': p.nombre_visitado || p.prestamos_datos?.socios_datos?.nombre_completo || 'Socio Desconocido',
       'Tipo de Sujeto': p.sujeto_tipo || 'Socio',
       'Origen Promesa': p.is_informal ? 'Bitácora / Gestión' : 'Promesa Formal',
-      'Monto': p.is_informal ? 0 : (p.monto || 0),
+      'Monto': p.monto || 0,
       'Fecha Programada': safeFormatDate(p.fecha_pago),
       'Inicio Gestión': safeFormatDate(p.fecha_inicio_gestion),
       'Gestor': p.gestor_nombre || p.gestor_id,
@@ -209,13 +209,12 @@ export default function PromesasPage() {
                   </div>
                   <div className="text-right flex items-center gap-8">
                     <div className="max-w-[200px]">
-                      {p.is_informal ? (
+                      {p.is_informal && (
                         <div className="text-xs text-slate-600 font-medium italic mb-1 line-clamp-1">
                           "{p.descripcion}"
                         </div>
-                      ) : (
-                        <div className="font-black text-slate-900">${(p.monto || 0).toLocaleString()}</div>
                       )}
+                      <div className="font-black text-slate-900">${(p.monto || 0).toLocaleString()}</div>
                       
                       <div className={`text-[10px] font-bold uppercase tracking-tighter ${
                         p.is_informal ? 'text-amber-600' :
