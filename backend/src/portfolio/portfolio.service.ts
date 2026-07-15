@@ -428,6 +428,7 @@ export class PortfolioService {
           cp_aval: getValueCaseInsensitive(row, 'CP', 'cp_aval', 'codigo_postal', 'codigopostal'),
           cruces_aval: getValueCaseInsensitive(row, 'CRUCES', 'cruces_aval', 'cruce'),
           estado_aval: getValueCaseInsensitive(row, 'ESTADO', 'estado_aval', 'estado') || 'JALISCO',
+          telefono_aval: getValueCaseInsensitive(row, 'TELEFONOS', 'telefono', 'tel', 'telefono_aval', 'celular'),
           gestor_asignado: gestorMatch,
           tipo_aval: tipoAval
         });
