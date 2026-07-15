@@ -141,9 +141,9 @@ export default function GestionesPage() {
         'Tipo': item.tipo_gestion,
         'NoPrestamo': item.asignacion?.NoCUENTA || item.num_cuenta || 'N/A',
         'Socio ID': item.socio_id,
-        'Nombre Socio': item.asignacion?.NOMBRE || '',
+        'Nombre Socio': item.socios_datos?.nombre_completo || item.asignacion?.NOMBRE || '',
         'Nombre Aval': esAvalExcel ? (item.nombre_visitado || '') : '',
-        'Nombre Visitado': item.nombre_visitado || item.asignacion?.NOMBRE || '',
+        'Nombre Visitado': item.nombre_visitado || item.socios_datos?.nombre_completo || item.asignacion?.NOMBRE || '',
         'Gestor': item.usuarios_gestor?.gestor || 'Sistema',
         'Sujeto Visitado': sujetoExcel,
         'Inicio Gestión': safeFormatDate(item.fecha_inicio_gestion, false),
@@ -358,15 +358,15 @@ export default function GestionesPage() {
                     </div>
                    {getSujetoEfectivo(item).startsWith('Aval') ? (
                      <div className="flex flex-col gap-1 mt-1 border-t border-slate-100 pt-1">
-                       {item.asignacion?.NOMBRE && (
-                         <div className="flex items-center gap-1.5">
-                           <User size={13} className="text-slate-400" />
-                           <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">Socio</span>
-                           <span className="text-slate-700 font-bold text-xs tracking-normal capitalize">
-                             {item.asignacion.NOMBRE.toLowerCase()}
-                           </span>
-                         </div>
-                       )}
+                        {(item.socios_datos?.nombre_completo || item.asignacion?.NOMBRE) && (
+                          <div className="flex items-center gap-1.5">
+                            <User size={13} className="text-slate-400" />
+                            <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-200 text-slate-600">Socio</span>
+                            <span className="text-slate-700 font-bold text-xs tracking-normal capitalize">
+                              {(item.socios_datos?.nombre_completo || item.asignacion.NOMBRE).toLowerCase()}
+                            </span>
+                          </div>
+                        )}
                        {item.nombre_visitado && (
                          <div className="flex items-center gap-1.5">
                            <User size={13} className="text-blue-500" />
