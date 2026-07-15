@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 
-dotenv.config({ path: 'c:/Users/Desarrollo/Desktop/Dev/saas/GC-CPO/backend/.env' });
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const SERVICE_ROLE_KEY = process.env.SUPABASE_KEY || '';
 const supabase = createClient(process.env.SUPABASE_URL!, SERVICE_ROLE_KEY);

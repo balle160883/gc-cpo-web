@@ -112,6 +112,27 @@ export class PortfolioService {
     return data;
   }
 
+  private _toUTCStartOfDay(dateStr: string): string {
+    if (!dateStr) return dateStr;
+    const match = dateStr.match(/^\d{4}-\d{2}-\d{2}$/);
+    if (match) {
+      return `${dateStr}T06:00:00.000Z`;
+    }
+    return dateStr;
+  }
+
+  private _toUTCEndOfDay(dateStr: string): string {
+    if (!dateStr) return dateStr;
+    const match = dateStr.match(/^\d{4}-\d{2}-\d{2}$/);
+    if (match) {
+      const date = new Date(`${dateStr}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + 1);
+      const nextDayStr = date.toISOString().split('T')[0];
+      return `${nextDayStr}T05:59:59.999Z`;
+    }
+    return dateStr;
+  }
+
   async getRecuperacion(gestorId?: string, startDate?: string, endDate?: string) {
     const recoveryDocs: any[] = [];
 
@@ -122,8 +143,8 @@ export class PortfolioService {
         .from('pagos_recuperados')
         .select('*');
 
-      if (startDate) queryPagos = queryPagos.gte('fecha_real', startDate);
-      if (endDate) queryPagos = queryPagos.lte('fecha_real', endDate);
+      if (startDate) queryPagos = queryPagos.gte('fecha_real', this._toUTCStartOfDay(startDate));
+      if (endDate) queryPagos = queryPagos.lte('fecha_real', this._toUTCEndOfDay(endDate));
 
       const { data: pagosLog, error: errorPagos } = await queryPagos
         .order('created_at', { ascending: false })

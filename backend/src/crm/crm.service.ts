@@ -214,6 +214,27 @@ export class CrmService {
     return allResults;
   }
 
+  private _toUTCStartOfDay(dateStr: string): string {
+    if (!dateStr) return dateStr;
+    const match = dateStr.match(/^\d{4}-\d{2}-\d{2}$/);
+    if (match) {
+      return `${dateStr}T06:00:00.000Z`;
+    }
+    return dateStr;
+  }
+
+  private _toUTCEndOfDay(dateStr: string): string {
+    if (!dateStr) return dateStr;
+    const match = dateStr.match(/^\d{4}-\d{2}-\d{2}$/);
+    if (match) {
+      const date = new Date(`${dateStr}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + 1);
+      const nextDayStr = date.toISOString().split('T')[0];
+      return `${nextDayStr}T05:59:59.999Z`;
+    }
+    return dateStr;
+  }
+
   async registrarInteraccion(interaccion: any) {
     // Map tipo_gestion to tipo_contacto for compatibility with the database schema
     if (interaccion.tipo_gestion) {
@@ -329,12 +350,9 @@ export class CrmService {
         .range(from, to);
 
       if (resolvedGestorId) paginatedQuery = paginatedQuery.eq('gestor_id', resolvedGestorId);
-      if (startDate) paginatedQuery = paginatedQuery.gte('fecha_gestion', startDate);
-      if (endDate) {
-        const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
-        paginatedQuery = paginatedQuery.lte('fecha_gestion', end.toISOString());
-      }
+      if (startDate) paginatedQuery = paginatedQuery.gte('fecha_gestion', this._toUTCStartOfDay(startDate));
+      if (endDate) paginatedQuery = paginatedQuery.lte('fecha_gestion', this._toUTCEndOfDay(endDate));
+
 
       const { data: pageData, error } = await paginatedQuery;
 
@@ -442,11 +460,7 @@ export class CrmService {
     }
 
     if (startDate) promiseQuery = promiseQuery.gte('fecha_promesa', startDate);
-    if (endDate) {
-       const end = new Date(endDate);
-       end.setHours(23, 59, 59, 999);
-       promiseQuery = promiseQuery.lte('fecha_promesa', end.toISOString());
-    }
+    if (endDate) promiseQuery = promiseQuery.lte('fecha_promesa', endDate);
 
     // 2. Query informal and formal promises originating from cobranza_interacciones
     let interactionQuery = this.supabaseService
@@ -460,12 +474,8 @@ export class CrmService {
       interactionQuery = interactionQuery.eq('gestor_id', resolvedGestorId);
     }
     
-    if (startDate) interactionQuery = interactionQuery.gte('fecha_gestion', startDate);
-    if (endDate) {
-       const end = new Date(endDate);
-       end.setHours(23, 59, 59, 999);
-       interactionQuery = interactionQuery.lte('fecha_gestion', end.toISOString());
-    }
+    if (startDate) interactionQuery = interactionQuery.gte('fecha_gestion', this._toUTCStartOfDay(startDate));
+    if (endDate) interactionQuery = interactionQuery.lte('fecha_gestion', this._toUTCEndOfDay(endDate));
 
     const [promRes, intRes, gestoresRes] = await Promise.all([
       promiseQuery, 
