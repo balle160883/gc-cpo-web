@@ -123,7 +123,7 @@ export class CrmService {
         if (s.socio_id === Number(i.socio_id)) return true;
         return s.friendly_code === iStr || s.friendly_code === iPadded;
       });
-      const fCode = foundSocio?.friendly_code || (isNum ? null : iStr);
+      const fCode = foundSocio?.friendly_code || iStr;
 
       let foundAsig = fCode ? (
         avales.find(a => 
